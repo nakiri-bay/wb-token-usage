@@ -13,6 +13,7 @@ import sys
 import time
 import random
 import datetime
+import subprocess
 
 BASE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, BASE)
@@ -34,7 +35,36 @@ def next_wait():
     return random.randint(INTERVAL - JITTER, INTERVAL + JITTER)
 
 
+def _pid_alive(pid):
+    """Windows 下判断某 PID 是否仍在运行。"""
+    try:
+        out = subprocess.run(["tasklist", "/FI", "PID eq %d" % pid],
+                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                             text=True, timeout=10,
+                             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        return ("%d" % pid) in (out.stdout or "")
+    except Exception:
+        return False
+
+
+def already_running():
+    """已有守护在跑则不再启动，避免「开机自启」与「手动双击」重复拉起。"""
+    try:
+        with open(PID_PATH, "r", encoding="utf-8") as f:
+            pid = int(f.read().strip())
+    except Exception:
+        return False
+    return pid != os.getpid() and _pid_alive(pid)
+
+
 if __name__ == "__main__":
+    if already_running():
+        try:
+            old = open(PID_PATH, encoding="utf-8").read().strip()
+        except Exception:
+            old = "?"
+        log("已有守护在运行（pid=%s），本次启动跳过。" % old)
+        sys.exit(0)
     with open(PID_PATH, "w", encoding="utf-8") as f:
         f.write(str(os.getpid()))
     log("自动同步启动 pid=%s，基准 %d 秒 ±%d 秒随机" % (os.getpid(), INTERVAL, JITTER))

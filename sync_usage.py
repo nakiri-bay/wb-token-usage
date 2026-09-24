@@ -94,6 +94,20 @@ def build_batch():
     return cmds
 
 
+def _reset_daemon():
+    """关闭可能残留的 agent-browser 守护进程。
+
+    若已有守护在跑，batch 会打印「--profile, --args ignored: daemon already running」，
+    于是沿用旧 profile/session，快照残缺、同步失败（表现为“定时更新没生效”）。
+    """
+    try:
+        subprocess.run([NODE, CLI, "close"], timeout=25,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                       creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    except Exception:
+        pass
+
+
 def run_batch(cmds):
     """运行 batch，并把 node 的 stdout/stderr 重定向到文件（不要用 capture_output=True）。
 
@@ -105,6 +119,7 @@ def run_batch(cmds):
         print("[错误] 未找到 agent-browser，请先安装：npm i -g agent-browser"
               "（或设置环境变量 WB_AGENT_BROWSER_JS 指向 agent-browser.js）。")
         return False
+    _reset_daemon()  # 先关掉可能残留的旧守护，避免 --profile/--args 被忽略
     args = [NODE, CLI, "--args", "--no-sandbox",
             "--session", "points-sync", "--profile", PROFILE, "batch"] + cmds
     try:
