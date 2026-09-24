@@ -4,7 +4,7 @@
 sync_usage.py —— 通过浏览器自动化把 WorkBuddy 官方「今日积分消耗」同步进桌宠。
 
 机制（已实测可用）：
-  - 用 agent-browser（自带 Chromium）+ 独立持久 profile（脚本同目录下的 edge_sync_profile，
+  - 用 agent-browser（自带 Chromium）+ 独立持久 profile（项目根目录下的 edge_sync_profile，
     内含已登录的 WorkBuddy Cookie）打开用量页。
   - 全部操作在【一条 batch 命令】内完成：浏览器自动化 daemon 在单次调用期间持续存活，
     因此 open / 勾选“今天” / 翻页 / 快照 状态一致（分条调用会因 daemon 不跨进程常驻而失败）。
@@ -12,22 +12,38 @@ sync_usage.py —— 通过浏览器自动化把 WorkBuddy 官方「今日积分
     解析“积分消耗”列求和（按请求哈希去重，避免末页重复计数）。
   - 结果写入 official_daily.json（按日期覆盖），桌宠(deskpet.py)读取后官方值优先于估算值。
 
-运行：双击「同步用量.bat」
+运行：双击「scripts/同步用量.bat」；桌宠启动后亦会自动调用本模块。
+
+目录约定：本脚本位于 <项目根>/src/，而用户数据（浏览器 profile、official_daily.json、
+快照、日志）统一落在 <项目根>/，源码与数据分离，便于整目录移动/开源。
 """
 import os
 import re
 import sys
 import json
+import random
 import shutil
+import threading
 import subprocess
 import datetime
 
-BASE = os.path.dirname(os.path.abspath(__file__))
+HERE = os.path.dirname(os.path.abspath(__file__))       # <项目根>/src
+ROOT = os.path.dirname(HERE)                            # <项目根>
 HOME = os.path.expanduser("~")
-PROFILE = os.path.join(BASE, "edge_sync_profile")
-OFFICIAL_PATH = os.path.join(BASE, "official_daily.json")
-SNAP_PATH = os.path.join(BASE, "last_full_snapshot.txt")
+PROFILE = os.path.join(ROOT, "edge_sync_profile")
+OFFICIAL_PATH = os.path.join(ROOT, "official_daily.json")
+SNAP_PATH = os.path.join(ROOT, "last_full_snapshot.txt")
 USAGE_URL = "https://www.workbuddy.cn/profile/plans-usage"
+
+# 定时同步节奏：基准 15 分钟，随机 ±2 分钟（即 13~17 分钟），避免访问过于规律。
+# 桌宠内嵌的同步循环与 auto_sync.py 共用这里的常量，改一处即可。
+INTERVAL = 900
+JITTER = 120
+
+
+def next_wait():
+    """下一次同步的等待秒数（15±2 分钟）。"""
+    return random.randint(INTERVAL - JITTER, INTERVAL + JITTER)
 
 
 def _find_node():
@@ -94,27 +110,60 @@ def build_batch():
     return cmds
 
 
-def _reset_daemon():
+def _reset_daemon(timeout=25):
     """关闭可能残留的 agent-browser 守护进程。
 
     若已有守护在跑，batch 会打印「--profile, --args ignored: daemon already running」，
     于是沿用旧 profile/session，快照残缺、同步失败（表现为“定时更新没生效”）。
     """
+    if not (NODE and CLI):
+        return
     try:
-        subprocess.run([NODE, CLI, "close"], timeout=25,
+        subprocess.run([NODE, CLI, "close"], timeout=timeout,
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     except Exception:
         pass
 
 
+# 当前正在运行的 batch 子进程句柄（供 cancel() 从别的线程强行终止）
+_PROC = None
+_PROC_LOCK = threading.Lock()
+
+
+def cancel():
+    """立刻中止正在进行的同步，并关闭 agent-browser 守护。供桌宠退出时调用。
+
+    桌宠的同步跑在后台线程里，主线程 destroy 后守护线程会被直接回收，
+    但它派生的 node.exe 是独立进程、不会跟着消失，所以必须显式 terminate，
+    否则会留下一个占着 profile 的僵尸浏览器，导致下次同步拿到残缺快照。
+    """
+    with _PROC_LOCK:
+        proc = _PROC
+    if proc is not None:
+        try:
+            proc.terminate()
+        except Exception:
+            pass
+        try:
+            proc.wait(timeout=8)
+        except Exception:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+    _reset_daemon(timeout=8)
+
+
 def run_batch(cmds):
-    """运行 batch，并把 node 的 stdout/stderr 重定向到文件（不要用 capture_output=True）。
+    """运行 batch，把 node 的 stdout/stderr 重定向到文件（不要用 capture_output=True）。
 
     原因：agent-browser 会启动一个常驻 daemon，它继承了 stdout 管道，导致
     capture_output=True 的管道永远收不到 EOF、subprocess.run 无限阻塞被 harness 杀掉(SIGTERM)。
-    改为重定向到文件后，node 退出时 run() 立即返回。
+    改为重定向到文件后，node 退出时 wait() 立即返回。
+    用 Popen 而非 run，是为了把句柄留给 cancel() 从外部终止。
     """
+    global _PROC
     if not CLI:
         print("[错误] 未找到 agent-browser，请先安装：npm i -g agent-browser"
               "（或设置环境变量 WB_AGENT_BROWSER_JS 指向 agent-browser.js）。")
@@ -122,14 +171,31 @@ def run_batch(cmds):
     _reset_daemon()  # 先关掉可能残留的旧守护，避免 --profile/--args 被忽略
     args = [NODE, CLI, "--args", "--no-sandbox",
             "--session", "points-sync", "--profile", PROFILE, "batch"] + cmds
+    timed_out = False
     try:
         with open(SNAP_PATH, "w", encoding="utf-8") as out:
             # CREATE_NO_WINDOW：桌宠是 pythonw(无控制台)，直接拉起 node.exe(控制台程序)
             # 会被 Windows 分配一个可见黑窗；加此标志彻底静默。
-            subprocess.run(args, stdout=out, stderr=subprocess.STDOUT, timeout=200,
-                           creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-    except subprocess.TimeoutExpired:
-        print("[超时] batch 执行超时（>200s）。")
+            proc = subprocess.Popen(args, stdout=out, stderr=subprocess.STDOUT,
+                                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            with _PROC_LOCK:
+                _PROC = proc
+            try:
+                proc.wait(timeout=200)
+            except subprocess.TimeoutExpired:
+                timed_out = True
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+    except Exception as e:
+        print("[异常] 无法启动浏览器进程：%r" % e)
+        return False
+    finally:
+        with _PROC_LOCK:
+            _PROC = None
+    if timed_out:
+        print("[超时] batch 执行超时（>200s），本次跳过。")
         return False
     return True
 
@@ -234,12 +300,12 @@ def main():
         return
     print(msg)
     if ok:
-        print(f"   已写入 official_daily.json，桌宠将在下次刷新（约 1.5s）显示该官方值。")
+        print("   已写入 official_daily.json，桌宠将在下次刷新（约 1.5s）显示该官方值。")
 
 
 if __name__ == "__main__":
     import sys as _sys, datetime as _dt
-    _logp = os.path.join(BASE, "sync_log.txt")
+    _logp = os.path.join(ROOT, "sync_log.txt")
     class _Tee:
         def __init__(self, f): self.f = f
         def write(self, s):

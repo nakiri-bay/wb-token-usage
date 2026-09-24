@@ -8,19 +8,23 @@ gen_to_pet.py —— 把 AI 生成的“棋盘格假透明”贴图加工成桌�
 4. mask 羽化 -> 缩到 140 宽 -> 预合成到键色（无锯齿、无 alpha）。
 5. 键色从候选里选【生成图中不存在】的颜色。
 
-用法：python gen_to_pet.py [输入图路径]
-     （缺省输入为脚本同目录下的 gen/input.png）
+用法：python tools/gen_to_pet.py [输入图路径]
+     （缺省输入为 <项目根>/gen/input.png，输出 <项目根>/assets/pet_image.png）
 """
 from PIL import Image, ImageFilter
 from collections import deque
 import os
 import sys
 
-BASE = os.path.dirname(os.path.abspath(__file__))
-# 输入图：命令行第一个参数；缺省用 gen/input.png
-SRC = sys.argv[1] if len(sys.argv) > 1 else os.path.join(BASE, "gen", "input.png")
-OUT_IMG = os.path.join(BASE, "pet_image.png")
-OUT_PREVIEW = os.path.join(BASE, "pet_image_preview.png")
+HERE = os.path.dirname(os.path.abspath(__file__))       # <项目根>/tools
+ROOT = os.path.dirname(HERE)                            # <项目根>
+# 输入图：命令行第一个参数；缺省用 <项目根>/gen/input.png
+SRC = sys.argv[1] if len(sys.argv) > 1 else os.path.join(ROOT, "gen", "input.png")
+OUT_IMG = os.path.join(ROOT, "assets", "pet_image.png")
+# 预览图是调试产物，放 gen/（整个目录都在 .gitignore 里），保持 assets/ 只有成品
+OUT_PREVIEW = os.path.join(ROOT, "gen", "pet_image_preview.png")
+os.makedirs(os.path.dirname(OUT_IMG), exist_ok=True)
+os.makedirs(os.path.dirname(OUT_PREVIEW), exist_ok=True)
 W_TARGET = 140
 SCALE = 1024 * 1024 / (281 * 257)   # 面积比例，用于放大口袋阈值
 

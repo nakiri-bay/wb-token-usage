@@ -1,14 +1,20 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-桌宠 · WorkBuddy 用量小助手（新版）
-- 形象：透明底人物贴图（pet_image.png，由 pet_cutout.png 生成）
+桌宠 · WorkBuddy 积分消耗统计
+- 形象：透明底人物贴图（assets/pet_image.png，由 tools/make_cutout.py 生成）
 - 头顶聊天框：今日用量 / 累计用量，每 1.5s 自动刷新（官方值优先，其次本地估算）
-- “今日用量”右侧 ↻ 图标：点击后台线程跑一次官方同步（约 30-40s，不卡界面）
-- 拖动人物移动窗口；右键菜单：手动刷新 / 打开官方用量页 / 退出
+- “今日用量”右侧 ↻ 图标：点击立刻跑一次官方同步（后台线程，约 30-40s，不卡界面）
+- 拖动人物移动窗口；右键菜单：立即同步 / 打开官方用量页 / 退出
+
+同步生命周期（本文件自带，无需再单独启动守护进程）：
+  启动即同步一次  ->  之后每 15±2 分钟自动同步  ->  退出时终止同步线程与浏览器进程
+  即“打开统计助手 = 打开同步”，关掉统计助手 = 关掉同步，不留后台残留。
 """
 import os
+import sys
 import json
+import socket
 import datetime
 import threading
 import webbrowser
@@ -18,12 +24,29 @@ from collections import defaultdict
 
 USAGE_URL = "https://www.workbuddy.cn/profile/plans-usage"
 
-BASE = os.path.dirname(os.path.abspath(__file__))
-CONFIG_PATH = os.path.join(BASE, "config.json")
-LOG_PATH = os.path.join(BASE, "points_log.jsonl")
-OFFICIAL_PATH = os.path.join(BASE, "official_daily.json")
-IMG_PET = os.path.join(BASE, "pet_image.png")
-IMG_CUT = os.path.join(BASE, "pet_cutout.png")
+HERE = os.path.dirname(os.path.abspath(__file__))       # <项目根>/src
+ROOT = os.path.dirname(HERE)                            # <项目根>
+if HERE not in sys.path:
+    sys.path.insert(0, HERE)                            # 保证能 import sync_usage
+CONFIG_PATH = os.path.join(ROOT, "config.json")
+LOG_PATH = os.path.join(ROOT, "points_log.jsonl")
+OFFICIAL_PATH = os.path.join(ROOT, "official_daily.json")
+SYNC_LOG = os.path.join(ROOT, "sync_log.txt")
+IMG_PET = os.path.join(ROOT, "assets", "pet_image.png")
+
+# 单实例端口：已有一个桌宠在跑时，第二个实例直接退出（避免两个同步循环抢浏览器 profile）
+SINGLE_INSTANCE_PORT = 47653
+
+# sync_usage 必须放在 sys.path 补好之后再导入。允许失败：即便同步模块不可用，
+# 桌宠也能照常显示本地已有数据，不至于整个打不开。
+try:
+    import sync_usage
+    next_wait = sync_usage.next_wait
+    _SYNC_IMPORT_ERR = ""
+except Exception as _e:
+    sync_usage = None
+    next_wait = lambda: 900        # 兜底：模块不可用时同步循环空转
+    _SYNC_IMPORT_ERR = "%r" % (_e,)
 
 # ---- 版式常量（与设计稿一致）----
 WIN_W = 240
@@ -142,9 +165,10 @@ class DeskPet:
         self._draw_static()                    # 气泡/尾巴/人物（一次）
         self._last_vals = None                 # 缓存，值变化才重绘文字（防闪烁）
 
-        # ---- 手动同步状态 ----
+        # ---- 同步状态（后台同步线程写、refresh 读；仅作标志位，GIL 下读写安全）----
         self._sync_busy = False
-        self._sync_result = None
+        self._sync_stop = threading.Event()   # 置位后同步线程退出
+        self._sync_wake = threading.Event()   # 手动点击时提前唤醒等待
 
         # ---- 拖动 / 菜单 ----
         self._offset = (0, 0)
@@ -156,13 +180,17 @@ class DeskPet:
         self.cv.tag_bind("ri", "<Enter>", lambda e: self.cv.config(cursor="hand2"))
         self.cv.tag_bind("ri", "<Leave>", lambda e: self.cv.config(cursor=""))
         self.menu = Menu(root, tearoff=0)
-        self.menu.add_command(label="手动刷新用量", command=self.manual_refresh)
+        self.menu.add_command(label="立即同步用量", command=self.manual_refresh)
         self.menu.add_command(label="打开官方用量页", command=self.open_usage)
         self.menu.add_separator()
-        self.menu.add_command(label="退出统计", command=self.quit)
+        self.menu.add_command(label="退出统计（同时停止同步）", command=self.quit)
 
         self.refresh()
         self.root.after(int(cfg.get("refresh_ms", 1500)), self.refresh)
+
+        # 同步生命周期随桌宠：启动即同步一次 -> 定时同步 -> 退出时一并结束
+        threading.Thread(target=self._sync_loop, daemon=True,
+                         name="sync-loop").start()
 
     # ---------- 静态绘制 ----------
     def _draw_static(self):
@@ -236,11 +264,6 @@ class DeskPet:
             today_val = float(merged.get(today, 0))
             total = float(sum(merged.values()))
 
-            # 手动同步线程完成 -> 收结果
-            if self._sync_busy and self._sync_result is not None:
-                self._sync_busy = False
-                self._sync_result = None
-
             vals = (round(today_val, 2), round(total, 2), self._sync_busy)
             if vals != self._last_vals:
                 self._last_vals = vals
@@ -249,30 +272,54 @@ class DeskPet:
             pass
         self.root.after(int(self.cfg.get("refresh_ms", 1500)), self.refresh)
 
-    # ---------- 手动刷新 ----------
-    def manual_refresh(self, event=None):
-        if self._sync_busy:
-            return
-        self._sync_busy = True
-        self._sync_result = None
-        self._last_vals = None  # 强制重绘出“同步中…”
-        threading.Thread(target=self._sync_worker, daemon=True).start()
-
-    def _sync_worker(self):
+    # ---------- 同步：启动一次 + 定时 + 退出即停 ----------
+    def _log(self, msg):
         try:
-            import sync_usage
-            ok, msg = sync_usage.sync_once()
-        except Exception as e:
-            ok, msg = False, f"同步异常：{e!r}"
-        # 写日志便于排查
-        try:
-            with open(os.path.join(BASE, "sync_log.txt"), "a", encoding="utf-8") as f:
-                f.write("[%s] [手动刷新] %s %s\n" % (
-                    datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                    "OK  " if ok else "FAIL", msg))
+            with open(SYNC_LOG, "a", encoding="utf-8") as f:
+                f.write("[%s] %s\n" % (
+                    datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), msg))
         except Exception:
             pass
-        self._sync_result = (ok, msg)
+
+    def _sync_loop(self):
+        """后台同步线程：先立刻同步一次，之后每 15±2 分钟一次。
+
+        手动点 ↻ 只是把等待提前唤醒（_sync_wake），同步本身始终由本线程串行执行，
+        因此不会出现两次同步同时操作同一个浏览器 profile 的情况。
+        """
+        self._log("[循环] 同步线程启动（pid=%d），立即同步一次" % os.getpid())
+        reason = "自动"
+        while not self._sync_stop.is_set():
+            self._do_sync(reason)
+            if self._sync_stop.is_set():
+                break
+            wait = next_wait()
+            self._log("[循环] 下次同步等待 %d 秒（约 %.1f 分钟）" % (wait, wait / 60.0))
+            woken = self._sync_wake.wait(timeout=wait)
+            self._sync_wake.clear()
+            if self._sync_stop.is_set():
+                break
+            reason = "手动" if woken else "自动"
+        self._log("[循环] 同步线程退出")
+
+    def _do_sync(self, reason="自动"):
+        if sync_usage is None:
+            return
+        self._sync_busy = True
+        self._last_vals = None          # 强制重绘出“同步中…”
+        try:
+            ok, msg = sync_usage.sync_once()
+        except Exception as e:
+            ok, msg = False, "同步异常：%r" % (e,)
+        self._sync_busy = False
+        self._last_vals = None          # 同步完再强制重绘一次（显示最新数值）
+        self._log("[%s] %s %s" % (reason, "OK  " if ok else "FAIL", msg))
+
+    def manual_refresh(self, event=None):
+        """点击 ↻ / 右键“立即同步”：唤醒同步线程立刻再跑一次（不新开线程）。"""
+        if self._sync_busy:
+            return
+        self._sync_wake.set()
 
     # ---------- 交互 ----------
     def start_move(self, e):
@@ -291,14 +338,85 @@ class DeskPet:
             pass
 
     def quit(self):
+        # 退出时一并结束同步：先通知线程停止，再强行收掉进行中的浏览器进程，
+        # 否则 node.exe 是独立进程、主线程退出后它不会自己消失。
+        try:
+            self._sync_stop.set()
+            self._sync_wake.set()
+            if sync_usage is not None:
+                sync_usage.cancel()
+        except Exception:
+            pass
         self.root.destroy()
 
 
+def acquire_single_instance():
+    """抢占本地回环端口，实现“同时只允许一个桌宠”。
+
+    比 PID 文件更可靠：进程无论怎么退出（含强杀），socket 都会被系统回收。
+    """
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        s.bind(("127.0.0.1", SINGLE_INSTANCE_PORT))
+        s.listen(1)
+        return s
+    except OSError:
+        try:
+            s.close()
+        except Exception:
+            pass
+        return None
+
+
+def notify_already_running():
+    """已有一个桌宠时的轻提示：无边框小条，2.6 秒自动消失（不打断操作）。"""
+    try:
+        r = tk.Tk()
+        r.overrideredirect(True)
+        r.attributes("-topmost", True)
+        r.configure(bg=ACCENT)
+        tk.Label(r, text="  桌宠已经在运行啦，看看屏幕右下角 :)  ",
+                 bg=ACCENT, fg="white",
+                 font=("Microsoft YaHei", 10)).pack(padx=8, pady=6)
+        w, h = 320, 38
+        r.geometry("%dx%d+%d+%d" % (w, h,
+                                    r.winfo_screenwidth() - w - 20,
+                                    r.winfo_screenheight() - h - 150))
+        r.after(2600, r.destroy)
+        r.mainloop()
+    except Exception:
+        pass
+
+
 def main():
+    guard = acquire_single_instance()
+    if guard is None:
+        notify_already_running()
+        return
     cfg = load_config()
     root = tk.Tk()
-    DeskPet(root, cfg)
-    root.mainloop()
+    pet = DeskPet(root, cfg)
+
+    # pythonw 没有控制台，任何异常都会静默消失；统一落到 sync_log.txt 便于排查。
+    def _on_tk_error(exc, val, tb):
+        import traceback
+        pet._log("[异常] Tk 回调出错：%s: %s" % (getattr(exc, "__name__", exc), val))
+        pet._log(traceback.format_exc())
+    root.report_callback_exception = _on_tk_error
+
+    if _SYNC_IMPORT_ERR:
+        pet._log("[启动] 同步模块导入失败：%s" % _SYNC_IMPORT_ERR)
+    pet._log("[启动] 桌宠启动完成（pid=%d），窗口 %dx%d" % (os.getpid(), WIN_W, pet.H))
+    try:
+        root.mainloop()
+    except Exception as e:
+        import traceback
+        pet._log("[致命] 主循环异常退出：%r" % (e,))
+        pet._log(traceback.format_exc())
+        raise
+    finally:
+        pet._log("[退出] 桌宠进程结束（pid=%d）" % os.getpid())
+    del pet, guard          # 显式释放：guard 关闭即让出单实例端口
 
 
 if __name__ == "__main__":

@@ -13,9 +13,10 @@ import json
 import os
 import datetime
 
-BASE = os.path.dirname(os.path.abspath(__file__))
-CONFIG_PATH = os.path.join(BASE, "config.json")
-LOG_PATH = os.path.join(BASE, "points_log.jsonl")
+BASE = os.path.dirname(os.path.abspath(__file__))       # <项目根>/src
+ROOT = os.path.dirname(BASE)                            # <项目根>
+CONFIG_PATH = os.path.join(ROOT, "config.json")
+LOG_PATH = os.path.join(ROOT, "points_log.jsonl")
 
 DEFAULT_CONFIG = {
     "points_per_reply": 8,

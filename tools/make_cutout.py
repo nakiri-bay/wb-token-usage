@@ -13,19 +13,23 @@ make_cutout.py v3 —— 生成桌宠贴图 pet_image.png（预合成到透明�
       把 KEY 色抠透明即可，无锯齿、无白边、无黑脏边。
 5. KEY 从候选色中选一个【原图中不存在】的颜色，避免人物内部出现透明洞。
 
-用法：python make_cutout.py [输入图路径]
-     （缺省输入为脚本同目录下的 gen/input.png）
+用法：python tools/make_cutout.py [输入图路径]
+     （缺省输入为 <项目根>/gen/input.png，输出 <项目根>/assets/pet_image.png）
 """
 from PIL import Image, ImageFilter
 from collections import deque
 import os
 import sys
 
-BASE = os.path.dirname(os.path.abspath(__file__))
-# 输入图：命令行第一个参数；缺省用 gen/input.png
-IMG = sys.argv[1] if len(sys.argv) > 1 else os.path.join(BASE, "gen", "input.png")
-OUT_IMG = os.path.join(BASE, "pet_image.png")
-OUT_PREVIEW = os.path.join(BASE, "pet_image_preview.png")
+HERE = os.path.dirname(os.path.abspath(__file__))       # <项目根>/tools
+ROOT = os.path.dirname(HERE)                            # <项目根>
+# 输入图：命令行第一个参数；缺省用 <项目根>/gen/input.png
+IMG = sys.argv[1] if len(sys.argv) > 1 else os.path.join(ROOT, "gen", "input.png")
+OUT_IMG = os.path.join(ROOT, "assets", "pet_image.png")
+# 预览图是调试产物，放 gen/（整个目录都在 .gitignore 里），保持 assets/ 只有成品
+OUT_PREVIEW = os.path.join(ROOT, "gen", "pet_image_preview.png")
+os.makedirs(os.path.dirname(OUT_IMG), exist_ok=True)
+os.makedirs(os.path.dirname(OUT_PREVIEW), exist_ok=True)
 W_TARGET = 140
 
 # ---------- 1. 抠 mask（两遍泛洪，同已验证逻辑）----------
