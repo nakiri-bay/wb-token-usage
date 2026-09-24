@@ -1,0 +1,160 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+"""
+gen_to_pet.py —— 把 AI 生成的“棋盘格假透明”贴图加工成桌宠可用的 pet_image.png
+1. 泛洪删除棋盘格背景（边缘连通的浅色区）。
+2. 删除封闭背景口袋（发丝间隙里的棋盘格）。
+3. 只保留最大连通组件（去掉右下角水印等杂物）。
+4. mask 羽化 -> 缩到 140 宽 -> 预合成到键色（无锯齿、无 alpha）。
+5. 键色从候选里选【生成图中不存在】的颜色。
+
+用法：python gen_to_pet.py [输入图路径]
+     （缺省输入为脚本同目录下的 gen/input.png）
+"""
+from PIL import Image, ImageFilter
+from collections import deque
+import os
+import sys
+
+BASE = os.path.dirname(os.path.abspath(__file__))
+# 输入图：命令行第一个参数；缺省用 gen/input.png
+SRC = sys.argv[1] if len(sys.argv) > 1 else os.path.join(BASE, "gen", "input.png")
+OUT_IMG = os.path.join(BASE, "pet_image.png")
+OUT_PREVIEW = os.path.join(BASE, "pet_image_preview.png")
+W_TARGET = 140
+SCALE = 1024 * 1024 / (281 * 257)   # 面积比例，用于放大口袋阈值
+
+src = Image.open(SRC).convert("RGB")
+w, h = src.size
+px = src.load()
+
+# 棋盘格 = 白 + 浅灰，全部视为背景
+def is_bg(p):
+    r, g, b = p
+    return (r + g + b) / 3 > 175 and max(r, g, b) - min(r, g, b) < 30
+
+# ---------- 1. 边缘泛洪 ----------
+seen = [[False] * w for _ in range(h)]
+q = deque()
+for x in range(w):
+    for y in (0, h - 1):
+        if is_bg(px[x, y]) and not seen[y][x]:
+            seen[y][x] = True; q.append((x, y))
+for y in range(h):
+    for x in (0, w - 1):
+        if is_bg(px[x, y]) and not seen[y][x]:
+            seen[y][x] = True; q.append((x, y))
+while q:
+    x, y = q.popleft()
+    for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+        nx, ny = x + dx, y + dy
+        if 0 <= nx < w and 0 <= ny < h and not seen[ny][nx] and is_bg(px[nx, ny]):
+            seen[ny][nx] = True; q.append((nx, ny))
+
+# ---------- 2. 封闭背景口袋（发丝间隙中的棋盘格）----------
+visited = [[False] * w for _ in range(h)]
+for sy in range(h):
+    for sx in range(w):
+        if visited[sy][sx] or seen[sy][sx] or not is_bg(px[sx, sy]):
+            continue
+        comp = [(sx, sy)]
+        visited[sy][sx] = True
+        qq = deque([(sx, sy)])
+        while qq:
+            x, y = qq.popleft()
+            for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                nx, ny = x + dx, y + dy
+                if (0 <= nx < w and 0 <= ny < h and not visited[ny][nx]
+                        and not seen[ny][nx] and is_bg(px[nx, ny])):
+                    visited[ny][nx] = True
+                    comp.append((nx, ny))
+                    qq.append((nx, ny))
+        if len(comp) < int(800 * SCALE):
+            for x, y in comp:
+                seen[y][x] = True
+
+# ---------- 3. 非背景组件只保留最大（去水印等杂物）----------
+labels = [[0] * w for _ in range(h)]
+comps = []
+for sy in range(h):
+    for sx in range(w):
+        if seen[sy][sx] or labels[sy][sx]:
+            continue
+        cid = len(comps) + 1
+        comp = [(sx, sy)]
+        labels[sy][sx] = cid
+        qq = deque([(sx, sy)])
+        while qq:
+            x, y = qq.popleft()
+            for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                nx, ny = x + dx, y + dy
+                if (0 <= nx < w and 0 <= ny < h and not seen[ny][nx]
+                        and not labels[ny][nx]):
+                    labels[ny][nx] = cid
+                    comp.append((nx, ny))
+                    qq.append((nx, ny))
+        comps.append(comp)
+comps.sort(key=len, reverse=True)
+print("组件数:", len(comps), "最大:", len(comps[0]) if comps else 0)
+for comp in comps[1:]:
+    if len(comp) < int(2000 * SCALE):
+        for x, y in comp:
+            seen[y][x] = True
+
+# ---------- 4. mask -> 羽化 -> 缩放 -> 预合成键色 ----------
+mask = Image.new("L", (w, h), 0)
+mp = mask.load()
+for y in range(h):
+    for x in range(w):
+        if not seen[y][x]:
+            mp[x, y] = 255
+
+colors = set()
+for y in range(0, h, 2):
+    for x in range(0, w, 2):
+        colors.add(px[x, y])
+KEY = None
+for c in ["#241812", "#1A0F0A", "#010203", "#030104", "#200D06",
+          "#2B1D15", "#170D08", "#301F16"]:
+    t = tuple(int(c[i:i + 2], 16) for i in (1, 3, 5))
+    if t not in colors:
+        KEY = t
+        KEY_HEX = c
+        break
+assert KEY, "候选键色全部冲突"
+print("选定键色:", KEY_HEX)
+
+bbox = mask.getbbox()
+mask_c = mask.crop(bbox)
+src_c = src.crop(bbox)
+tw = W_TARGET
+th = round(mask_c.height * tw / mask_c.width)
+alpha = mask_c.filter(ImageFilter.GaussianBlur(1.0)).resize((tw, th), Image.BILINEAR)
+rgb = src_c.resize((tw, th), Image.LANCZOS)
+
+ap = alpha.load(); rp = rgb.load()
+out = Image.new("RGB", (tw, th), KEY)
+op = out.load()
+for y in range(th):
+    for x in range(tw):
+        a = ap[x, y] / 255.0
+        if a <= 0.02:
+            continue
+        r, g, b = rp[x, y]
+        op[x, y] = (
+            max(0, min(255, round(r - (1 - a) * (255 - KEY[0])))),
+            max(0, min(255, round(g - (1 - a) * (255 - KEY[1])))),
+            max(0, min(255, round(b - (1 - a) * (255 - KEY[2])))),
+        )
+out.save(OUT_IMG)
+print("saved", OUT_IMG, out.size)
+
+prev = Image.new("RGB", (tw + 60, th + 60), "#EEF2F7")
+prev.paste(out, (30, 30))
+pk = prev.load()
+for y in range(prev.height):
+    for x in range(prev.width):
+        if pk[x, y] == KEY:
+            pk[x, y] = (238, 242, 247)
+prev.save(OUT_PREVIEW)
+print("saved", OUT_PREVIEW)

@@ -1,0 +1,47 @@
+# ---- 敏感 / 隐私数据（登录态、真实用量、日志、快照）----
+# 这些是本机运行产生的数据，绝不能上传（含账号信息 / 真实用量）
+official_daily.json
+points_log.jsonl
+sync_log.txt
+auto_sync_log.txt
+auto_sync.pid
+last_full_snapshot.txt
+open_log.txt
+
+# ---- 浏览器持久化 profile（含已登录 Cookie，体积巨大）----
+browser_profile/
+edge_sync_profile/
+edge_profile_sync/
+*_profile/
+
+# ---- 开发过程临时产物 ----
+_*.txt
+open*.txt
+edge_open*.txt
+page.png
+_trash/
+
+# ---- 图像处理中间产物（保留最终成品 pet_image.png）----
+pet_cutout.png
+pet_design_preview.png
+pet_image_preview.png
+gen/
+
+# ---- Python 缓存 / 虚拟环境 ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# ---- 原始素材（体积大且可能涉版权，按需自行决定是否提交）----
+Nakiri.png
+
+# ---- WorkBuddy 工作区（本地记忆，不发布）----
+.workbuddy/
+
+# ---- 系统文件 ----
+Thumbs.db
+Desktop.ini
+.DS_Store

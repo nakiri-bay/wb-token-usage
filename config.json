@@ -1,0 +1,8 @@
+{
+  "points_per_reply": 8,
+  "points_per_tool_call": 3,
+  "pet_name": "豆豆",
+  "refresh_ms": 1500,
+  "pet_color": "#FFB74D",
+  "bg_color": "#FFF6E9"
+}

@@ -1,0 +1,7 @@
+# 统一行尾，避免 Windows 启动器出现换行问题
+* text=auto
+*.bat text eol=crlf
+*.vbs text eol=crlf
+*.py text eol=lf
+*.md text eol=lf
+*.json text eol=lf
