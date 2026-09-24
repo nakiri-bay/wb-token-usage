@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-gen_to_pet.py —— 把 AI 生成的“棋盘格假透明”贴图加工成桌宠可用的 pet_image.png
+gen_to_pet.py —— 把 AI 生成的“棋盘格假透明”贴图加工成统计助手所需的贴图 pet_image.png
 1. 泛洪删除棋盘格背景（边缘连通的浅色区）。
 2. 删除封闭背景口袋（发丝间隙里的棋盘格）。
 3. 只保留最大连通组件（去掉右下角水印等杂物）。

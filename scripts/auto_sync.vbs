@@ -1,6 +1,6 @@
 ' auto_sync.vbs —— 静默启动「独立同步守护」（无窗口，后台常驻）
-' 注意：桌宠（deskpet.py）已自带同步循环，一般不需要本脚本；
-'       仅当你想让同步独立于桌宠运行（例如不常开桌宠窗口）时才用它。
+' 注意：统计助手（deskpet.py）已自带同步循环，一般不需要本脚本；
+'       仅当你想让同步独立于统计助手运行（例如不常开统计助手窗口）时才用它。
 '       两者不要同时跑：会争抢同一个浏览器 profile。停止见「停止自动同步.bat」。
 ' 日志见 auto_sync_log.txt
 Set fso = CreateObject("Scripting.FileSystemObject")

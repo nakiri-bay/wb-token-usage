@@ -1,4 +1,4 @@
-# 桌宠本体（deskpet.py / sync_usage.py / auto_sync.py / log_points.py）只依赖 Python 标准库，
+# 统计助手本体（deskpet.py / sync_usage.py / auto_sync.py / log_points.py）只依赖 Python 标准库，
 # 无需在此声明。以下依赖仅供图像处理脚本使用：
 #   make_cutout.py   —— 把人物原图抠成 pet_image.png
 #   gen_to_pet.py    —— 把 AI 生成的贴图加工成 pet_image.png

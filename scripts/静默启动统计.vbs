@@ -1,5 +1,5 @@
-' 静默启动桌宠（WorkBuddy 积分消耗统计）：双击运行，全程无黑色命令行窗口闪烁
-' 桌宠自带同步：启动即同步一次 -> 之后每 15±2 分钟自动同步 -> 退出桌宠时同步一并停止。
+' 静默启动统计助手（WorkBuddy 积分消耗统计）：双击运行，全程无黑色命令行窗口闪烁
+' 统计助手自带同步：启动即同步一次 -> 之后每 15±2 分钟自动同步 -> 退出统计助手时同步一并停止。
 ' 路径随本文件自动解析（启动器在 scripts/，源码在 ../src/），整个文件夹移动后依然可用。
 Set fso = CreateObject("Scripting.FileSystemObject")
 Set sh = CreateObject("WScript.Shell")

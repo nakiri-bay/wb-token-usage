@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-sync_usage.py —— 通过浏览器自动化把 WorkBuddy 官方「今日积分消耗」同步进桌宠。
+sync_usage.py —— 通过浏览器自动化把 WorkBuddy 官方「今日积分消耗」同步进统计助手。
 
 机制（已实测可用）：
   - 用 agent-browser（自带 Chromium）+ 独立持久 profile（项目根目录下的 edge_sync_profile，
@@ -10,9 +10,9 @@ sync_usage.py —— 通过浏览器自动化把 WorkBuddy 官方「今日积分
     因此 open / 勾选“今天” / 翻页 / 快照 状态一致（分条调用会因 daemon 不跨进程常驻而失败）。
   - 勾选“今天”单选 -> 表格仅显示今日记录 -> 逐页快照（scrollintoview+click 翻页） ->
     解析“积分消耗”列求和（按请求哈希去重，避免末页重复计数）。
-  - 结果写入 official_daily.json（按日期覆盖），桌宠(deskpet.py)读取后官方值优先于估算值。
+  - 结果写入 official_daily.json（按日期覆盖），统计助手(deskpet.py)读取后官方值优先于估算值。
 
-运行：双击「scripts/同步用量.bat」；桌宠启动后亦会自动调用本模块。
+运行：双击「scripts/同步用量.bat」；统计助手启动后亦会自动调用本模块。
 
 目录约定：本脚本位于 <项目根>/src/，而用户数据（浏览器 profile、official_daily.json、
 快照、日志）统一落在 <项目根>/，源码与数据分离，便于整目录移动/开源。
@@ -36,7 +36,7 @@ SNAP_PATH = os.path.join(ROOT, "last_full_snapshot.txt")
 USAGE_URL = "https://www.workbuddy.cn/profile/plans-usage"
 
 # 定时同步节奏：基准 15 分钟，随机 ±2 分钟（即 13~17 分钟），避免访问过于规律。
-# 桌宠内嵌的同步循环与 auto_sync.py 共用这里的常量，改一处即可。
+# 统计助手内嵌的同步循环与 auto_sync.py 共用这里的常量，改一处即可。
 INTERVAL = 900
 JITTER = 120
 
@@ -132,9 +132,9 @@ _PROC_LOCK = threading.Lock()
 
 
 def cancel():
-    """立刻中止正在进行的同步，并关闭 agent-browser 守护。供桌宠退出时调用。
+    """立刻中止正在进行的同步，并关闭 agent-browser 守护。供统计助手退出时调用。
 
-    桌宠的同步跑在后台线程里，主线程 destroy 后守护线程会被直接回收，
+    统计助手的同步跑在后台线程里，主线程 destroy 后守护线程会被直接回收，
     但它派生的 node.exe 是独立进程、不会跟着消失，所以必须显式 terminate，
     否则会留下一个占着 profile 的僵尸浏览器，导致下次同步拿到残缺快照。
     """
@@ -174,7 +174,7 @@ def run_batch(cmds):
     timed_out = False
     try:
         with open(SNAP_PATH, "w", encoding="utf-8") as out:
-            # CREATE_NO_WINDOW：桌宠是 pythonw(无控制台)，直接拉起 node.exe(控制台程序)
+            # CREATE_NO_WINDOW：统计助手是 pythonw(无控制台)，直接拉起 node.exe(控制台程序)
             # 会被 Windows 分配一个可见黑窗；加此标志彻底静默。
             proc = subprocess.Popen(args, stdout=out, stderr=subprocess.STDOUT,
                                     creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
@@ -300,7 +300,7 @@ def main():
         return
     print(msg)
     if ok:
-        print("   已写入 official_daily.json，桌宠将在下次刷新（约 1.5s）显示该官方值。")
+        print("   已写入 official_daily.json，统计助手将在下次刷新（约 1.5s）显示该官方值。")
 
 
 if __name__ == "__main__":

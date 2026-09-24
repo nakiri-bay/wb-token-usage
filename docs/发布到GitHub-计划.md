@@ -3,11 +3,11 @@
 > ⚠️ **历史存档**：本文是**最初一轮**的发布计划（当时仓库还是扁平目录、同步靠独立守护进程）。
 > 之后又做了两件事，最终形态请以 [README](../README.md) 为准：
 > 1. **目录重构**：源码 → `src/`、启动器 → `scripts/`、贴图 → `assets/`、图像工具 → `tools/`、文档 → `docs/`；
-> 2. **同步生命周期并入桌宠**：打开桌宠 = 启动同步（先同步一次，之后每 15±2 分钟），
->    退出桌宠 = 同步进程一并结束；`auto_sync.py` 降级为可选的"独立守护模式"。
+> 2. **同步生命周期并入统计助手**：打开统计助手 = 启动同步（先同步一次，之后每 15±2 分钟），
+>    退出统计助手 = 同步进程一并结束；`auto_sync.py` 降级为可选的"独立守护模式"。
 
 > 仓库名：**wb-token-usage**
-> 目标：把"WorkBuddy 用量桌宠"整理成可公开的 GitHub 仓库。
+> 目标：把"WorkBuddy 积分消耗统计"整理成可公开的 GitHub 仓库。
 > 现状：`D:\桌宠` 目前**不是** git 仓库，目录里混有大量开发临时文件、浏览器登录 profile（668MB）和真实用量数据。
 
 ---
@@ -17,13 +17,13 @@
 ### ✅ 保留并提交（功能必需）
 | 文件 | 作用 |
 |------|------|
-| `deskpet.py` | 桌宠主程序（GUI、气泡、刷新图标、拖拽、右键菜单） |
+| `deskpet.py` | 统计助手主程序（GUI、气泡、刷新图标、拖拽、右键菜单） |
 | `sync_usage.py` | 官方用量同步（浏览器自动化 + 解析） |
 | `auto_sync.py` | 自动同步守护进程（15±2 分钟随机） |
 | `log_points.py` | 本地积分记账（写 points_log.jsonl） |
 | `config.json` | 配置（宠物名/颜色/刷新间隔/积分单价） |
 | `pet_image.png` | 宠物贴图（25KB，运行时必需） |
-| `静默启动统计.vbs` | 无窗口启动桌宠 |
+| `静默启动统计.vbs` | 无窗口启动统计助手 |
 | `auto_sync.vbs` | 启动自动同步守护 |
 | `同步用量.vbs` / `同步用量.bat` | 手动同步一次 |
 | `停止自动同步.bat` | 结束守护进程 |
@@ -57,7 +57,7 @@
 | 文件 | 说明 |
 |------|------|
 | `make_cutout.py`、`gen_to_pet.py`、`gen/` | 展示"贴图怎么做的"，非运行必需 |
-| `桌宠功能调研.md` | 调研笔记，可选 |
+| `同类挂件功能调研.md` | 调研笔记，可选 |
 
 ---
 
@@ -81,7 +81,7 @@ cd /d/桌宠
 git init
 git add README.md .gitignore requirements.txt deskpet.py sync_usage.py auto_sync.py log_points.py config.json pet_image.png
 git add "静默启动统计.vbs" auto_sync.vbs "同步用量.vbs" "同步用量.bat" "停止自动同步.bat" "启动统计.bat"
-git commit -m "feat: WorkBuddy 用量桌宠首个版本"
+git commit -m "feat: WorkBuddy 积分消耗统计 (wb-token-usage) 首个版本"
 ```
 
 ### 阶段 4：创建远程仓库并推送

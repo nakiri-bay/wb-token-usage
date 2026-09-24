@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-make_cutout.py v3 —— 生成桌宠贴图 pet_image.png（预合成到透明键色上）
+make_cutout.py v3 —— 生成统计助手贴图 pet_image.png（预合成到透明键色上）
 
 做法：
 1. 两遍泛洪抠出人物 mask（与之前相同的成熟逻辑）。

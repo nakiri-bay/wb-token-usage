@@ -1,5 +1,5 @@
 ' 同步用量.vbs —— 完全静默运行一次官方积分同步（不弹任何窗口）
-' 通常无需手动点：桌宠启动时、以及之后每 15±2 分钟都会自动同步一次。
+' 通常无需手动点：统计助手启动时、以及之后每 15±2 分钟都会自动同步一次。
 ' 运行日志见 sync_log.txt，结果见 official_daily.json。
 Set fso = CreateObject("Scripting.FileSystemObject")
 Set sh = CreateObject("WScript.Shell")

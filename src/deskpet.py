@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-桌宠 · WorkBuddy 积分消耗统计
+统计助手 · WorkBuddy 积分消耗统计
 - 形象：透明底人物贴图（assets/pet_image.png，由 tools/make_cutout.py 生成）
 - 头顶聊天框：今日用量 / 累计用量，每 1.5s 自动刷新（官方值优先，其次本地估算）
 - “今日用量”右侧 ↻ 图标：点击立刻跑一次官方同步（后台线程，约 30-40s，不卡界面）
@@ -34,14 +34,14 @@ OFFICIAL_PATH = os.path.join(ROOT, "official_daily.json")
 SYNC_LOG = os.path.join(ROOT, "sync_log.txt")
 IMG_PET = os.path.join(ROOT, "assets", "pet_image.png")
 
-# 单实例端口：已有一个桌宠在跑时，第二个实例直接退出（避免两个同步循环抢浏览器 profile）
+# 单实例端口：已有一个统计助手在跑时，第二个实例直接退出（避免两个同步循环抢浏览器 profile）
 SINGLE_INSTANCE_PORT = 47653
 
 # 同步日志的写入锁（主线程 refresh 与同步线程会并发追加）
 _LOG_LOCK = threading.Lock()
 
 # sync_usage 必须放在 sys.path 补好之后再导入。允许失败：即便同步模块不可用，
-# 桌宠也能照常显示本地已有数据，不至于整个打不开。
+# 统计助手也能照常显示本地已有数据，不至于整个打不开。
 try:
     import sync_usage
     next_wait = sync_usage.next_wait
@@ -191,7 +191,7 @@ class DeskPet:
         self.refresh()
         self.root.after(int(cfg.get("refresh_ms", 1500)), self.refresh)
 
-        # 同步生命周期随桌宠：启动即同步一次 -> 定时同步 -> 退出时一并结束
+        # 同步生命周期随统计助手：启动即同步一次 -> 定时同步 -> 退出时一并结束
         threading.Thread(target=self._sync_loop, daemon=True,
                          name="sync-loop").start()
 
@@ -356,7 +356,7 @@ class DeskPet:
 
 
 def acquire_single_instance():
-    """抢占本地回环端口，实现“同时只允许一个桌宠”。
+    """抢占本地回环端口，实现“同时只允许一个统计助手”。
 
     比 PID 文件更可靠：进程无论怎么退出（含强杀），socket 都会被系统回收。
     """
@@ -374,13 +374,13 @@ def acquire_single_instance():
 
 
 def notify_already_running():
-    """已有一个桌宠时的轻提示：无边框小条，2.6 秒自动消失（不打断操作）。"""
+    """已有一个统计助手时的轻提示：无边框小条，2.6 秒自动消失（不打断操作）。"""
     try:
         r = tk.Tk()
         r.overrideredirect(True)
         r.attributes("-topmost", True)
         r.configure(bg=ACCENT)
-        tk.Label(r, text="  桌宠已经在运行啦，看看屏幕右下角 :)  ",
+        tk.Label(r, text="  统计助手已经在运行啦，看看屏幕右下角 :)  ",
                  bg=ACCENT, fg="white",
                  font=("Microsoft YaHei", 10)).pack(padx=8, pady=6)
         w, h = 320, 38
@@ -411,7 +411,7 @@ def main():
 
     if _SYNC_IMPORT_ERR:
         pet._log("[启动] 同步模块导入失败：%s" % _SYNC_IMPORT_ERR)
-    pet._log("[启动] 桌宠启动完成（pid=%d），窗口 %dx%d" % (os.getpid(), WIN_W, pet.H))
+    pet._log("[启动] 统计助手启动完成（pid=%d），窗口 %dx%d" % (os.getpid(), WIN_W, pet.H))
     try:
         root.mainloop()
     except Exception as e:
@@ -420,7 +420,7 @@ def main():
         pet._log(traceback.format_exc())
         raise
     finally:
-        pet._log("[退出] 桌宠进程结束（pid=%d）" % os.getpid())
+        pet._log("[退出] 统计助手进程结束（pid=%d）" % os.getpid())
     del pet, guard          # 显式释放：guard 关闭即让出单实例端口
 
 

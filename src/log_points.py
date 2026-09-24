@@ -5,7 +5,7 @@ WorkBuddy 积分记账脚本（由 WorkBuddy 自动调用，也可手动调用�
 每次调用向 points_log.jsonl 追加一笔记录。
 
 用法示例：
-  python log_points.py --task "搭建桌宠 v1" --replies 1 --tools 6
+  python log_points.py --task "搭建统计助手 v1" --replies 1 --tools 6
   python log_points.py --task "手动校正" --points 120 --auto false
 """
 import argparse
