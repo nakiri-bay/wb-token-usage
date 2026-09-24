@@ -53,11 +53,12 @@ except Exception as _e:
 
 # ---- 版式常量（与设计稿一致）----
 WIN_W = 240
-BUB_W, BUB_H = 210, 76          # 聊天气泡
+BUB_W, BUB_H = 210, 96          # 聊天气泡（三行：今日 / 累计 / 剩余）
 MARGIN_TOP, GAP = 10, 18        # 顶部留白 / 气泡与人物间距（保证小尾巴完整）
 ACCENT = "#E05A6D"              # 气泡描边/图标
 T1_COLOR = "#C2185B"            # 今日用量文字
 T2_COLOR = "#5D4037"            # 累计用量文字
+T3_COLOR = "#00695C"            # 剩余积分文字（青绿，与消耗类区分）
 MAGIC = "#241812"               # 透明键色（与 make_cutout.py 选定的 KEY 一致，原图中不存在此色）
 BG = "#FFFFFF"                  # 气泡填充色
 ICON_R = 7                      # 刷新图标半径
@@ -111,17 +112,35 @@ def aggregate(entries):
 
 
 def load_official():
-    """官方同步得到的每日真实积分 {date: points}。"""
+    """官方同步得到的每日真实积分 {date: points}，以及剩余积分余额。
+
+    返回 (daily: dict, balance: float|None)。
+    official_daily.json 里日期键存每日消耗；下划线键（_balance）存剩余积分，需排除在按日统计之外。
+    """
+    daily = {}
+    balance = None
     if not os.path.exists(OFFICIAL_PATH):
-        return {}
+        return daily, balance
     try:
         with open(OFFICIAL_PATH, "r", encoding="utf-8") as f:
             data = json.load(f)
-        if isinstance(data, dict):
-            return {str(k): float(v) for k, v in data.items()}
+        if not isinstance(data, dict):
+            return daily, balance
+        for k, v in data.items():
+            if str(k).startswith("_"):
+                if str(k) == "_balance":
+                    try:
+                        balance = float(v)
+                    except Exception:
+                        balance = None
+                continue
+            try:
+                daily[str(k)] = float(v)
+            except Exception:
+                pass
     except Exception:
         pass
-    return {}
+    return daily, balance
 
 
 def rounded_rect_pts(x1, y1, x2, y2, r):
@@ -215,19 +234,20 @@ class DeskPet:
             cv.create_image(WIN_W // 2, ty + GAP, image=self._photo, anchor="n")
 
     # ---------- 动态文字（值变化才重绘，防闪烁）----------
-    def _draw_texts(self, today_val, total, syncing):
+    def _draw_texts(self, today_val, total, balance, syncing):
         cv = self.cv
         cv.delete("dyn")
         by = MARGIN_TOP
         t1 = f"今日用量：{today_val:.2f}"
         t2 = f"累计用量：{total:.2f}"
+        t3 = f"剩余积分：{balance:.2f}" if balance is not None else "剩余积分：—"
         # 第一行：文字 + 刷新图标 整体居中
         w1 = self.f1.measure(t1)
         status = " 同步中…" if syncing else ""
         ws = self.f2.measure(status) if status else 0
         group_w = w1 + ICON_GAP + ICON_R * 2 + ws
         gx = (WIN_W - group_w) / 2
-        y1 = by + 25
+        y1 = by + 24
         cv.create_text(gx, y1, text=t1, font=self.f1, fill=T1_COLOR,
                        anchor="w", tags="dyn")
         # 刷新图标：圆弧 + 箭头（同步中变灰）
@@ -250,16 +270,20 @@ class DeskPet:
             cv.create_text(gx + w1 + ICON_GAP + ICON_R * 2 + 4, y1,
                            text=status.strip(), font=self.f2, fill="#999999",
                            anchor="w", tags="dyn")
-        # 第二行
+        # 第二行：累计
         w2 = self.f2.measure(t2)
-        cv.create_text((WIN_W - w2) / 2, by + 52, text=t2, font=self.f2,
+        cv.create_text((WIN_W - w2) / 2, by + 50, text=t2, font=self.f2,
                        fill=T2_COLOR, anchor="w", tags="dyn")
+        # 第三行：剩余积分
+        w3 = self.f2.measure(t3)
+        cv.create_text((WIN_W - w3) / 2, by + 70, text=t3, font=self.f2,
+                       fill=T3_COLOR, anchor="w", tags="dyn")
 
     # ---------- 数据刷新 ----------
     def refresh(self):
         try:
             daily_est, _ = aggregate(load_entries())
-            official = load_official()
+            official, balance = load_official()
             today = datetime.date.today().isoformat()
             merged = dict(daily_est)
             for d, v in official.items():
@@ -267,10 +291,11 @@ class DeskPet:
             today_val = float(merged.get(today, 0))
             total = float(sum(merged.values()))
 
-            vals = (round(today_val, 2), round(total, 2), self._sync_busy)
+            vals = (round(today_val, 2), round(total, 2),
+                    None if balance is None else round(balance, 2), self._sync_busy)
             if vals != self._last_vals:
                 self._last_vals = vals
-                self._draw_texts(today_val, total, self._sync_busy)
+                self._draw_texts(today_val, total, balance, self._sync_busy)
         except Exception:
             pass
         self.root.after(int(self.cfg.get("refresh_ms", 1500)), self.refresh)

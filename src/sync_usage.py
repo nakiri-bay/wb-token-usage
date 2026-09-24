@@ -35,6 +35,10 @@ OFFICIAL_PATH = os.path.join(ROOT, "official_daily.json")
 SNAP_PATH = os.path.join(ROOT, "last_full_snapshot.txt")
 USAGE_URL = "https://www.workbuddy.cn/profile/plans-usage"
 
+# official_daily.json 里除“按日期存消耗”外，另存一个剩余积分余额。
+# 该键以下划线开头，便于 deskpet.py 与统计逻辑一眼区分“非日期字段”。
+BALANCE_KEY = "_balance"
+
 # 定时同步节奏：基准 15 分钟，随机 ±2 分钟（即 13~17 分钟），避免访问过于规律。
 # 统计助手内嵌的同步循环与 auto_sync.py 共用这里的常量，改一处即可。
 INTERVAL = 900
@@ -262,6 +266,30 @@ def parse_today(text):
     return total, count
 
 
+def parse_balance(text):
+    """从页面快照解析“剩余积分”总额（浮动可用余额），取不到返回 None。
+
+    用量页“套餐用量”区有多处带“剩余”的文案，形如：
+      button "可用0个·剩余0积分 查看全部"        <- 购买积分（可能为 0）
+      button "可用8个·剩余1772.51积分 查看全部"   <- 平台奖励积分（真正可用的浮动余额）
+
+    注意：batch 每次翻页都会 snapshot 一次，而“套餐用量”区块在每页都存在，
+    因此同一余额会在快照里重复出现很多次（实测 10 次）。所以必须【去重】而非求和，
+    否则会得到 10 倍的错误值。这里对所有匹配值去重后取最大者，即该区块的真实剩余积分。
+    """
+    vals = set()
+    # 形态一：单行完整 "…剩余<数字>积分…"
+    for m in re.finditer(r"剩余\s*([0-9]+(?:\.[0-9]+)?)\s*积分", text):
+        vals.add(float(m.group(1)))
+    # 形态二：快照被拆行——“个·剩余” 与其后的数字、“积分” 分列相邻 StaticText
+    if not vals:
+        for m in re.finditer(
+                r'个·剩余"[^\n]*\n\s*- StaticText\s*"([0-9]+(?:\.[0-9]+)?)"\s*\n'
+                r'\s*- StaticText\s*"积分"', text):
+            vals.add(float(m.group(1)))
+    return max(vals) if vals else None
+
+
 def sync_once():
     """执行一次完整同步，返回 (ok: bool, msg: str)。供 CLI 与守护脚本共用。"""
     global TODAY
@@ -274,9 +302,12 @@ def sync_once():
     if "套餐与用量" not in out and "个人版" not in out:
         return False, "⚠️ 页面似乎未登录（未检测到 WorkBuddy 用量页内容）。"
 
+    balance = parse_balance(out)
     total, count = parse_today(out)
     if count == 0:
-        return False, "[提示] 今日视图暂无积分消耗记录（可能尚未产生消耗，或页面结构变动）。"
+        # 余额也值得留存：即使今日暂无消耗，剩余积分仍可显示
+        if balance is None:
+            return False, "[提示] 今日视图暂无积分消耗记录（可能尚未产生消耗，或页面结构变动）。"
 
     data = {}
     if os.path.exists(OFFICIAL_PATH):
@@ -284,10 +315,17 @@ def sync_once():
             data = json.load(open(OFFICIAL_PATH, encoding="utf-8"))
         except Exception:
             data = {}
-    data[TODAY] = round(total, 2)
+    if count:
+        data[TODAY] = round(total, 2)
+    if balance is not None:
+        # 独立键保存余额（非日期键，deskpet 读取时跳过），避免被误当某天的消耗。
+        data[BALANCE_KEY] = round(balance, 2)
     with open(OFFICIAL_PATH, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
-    return True, f"[同步成功] 今日({TODAY})官方积分消耗合计：{total:.2f}（计入 {count} 条记录）"
+    bal_txt = f"，剩余积分 {balance:.2f}" if balance is not None else ""
+    if count == 0:
+        return True, f"[同步成功] 今日({TODAY})暂无消耗记录{bal_txt}"
+    return True, f"[同步成功] 今日({TODAY})官方积分消耗合计：{total:.2f}（计入 {count} 条记录）{bal_txt}"
 
 
 def main():
