@@ -37,6 +37,9 @@ IMG_PET = os.path.join(ROOT, "assets", "pet_image.png")
 # 单实例端口：已有一个桌宠在跑时，第二个实例直接退出（避免两个同步循环抢浏览器 profile）
 SINGLE_INSTANCE_PORT = 47653
 
+# 同步日志的写入锁（主线程 refresh 与同步线程会并发追加）
+_LOG_LOCK = threading.Lock()
+
 # sync_usage 必须放在 sys.path 补好之后再导入。允许失败：即便同步模块不可用，
 # 桌宠也能照常显示本地已有数据，不至于整个打不开。
 try:
@@ -274,10 +277,12 @@ class DeskPet:
 
     # ---------- 同步：启动一次 + 定时 + 退出即停 ----------
     def _log(self, msg):
+        """写同步日志。主线程与同步线程都会写，加锁避免并发追加丢行。"""
         try:
-            with open(SYNC_LOG, "a", encoding="utf-8") as f:
-                f.write("[%s] %s\n" % (
-                    datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), msg))
+            with _LOG_LOCK:
+                with open(SYNC_LOG, "a", encoding="utf-8") as f:
+                    f.write("[%s] %s\n" % (
+                        datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), msg))
         except Exception:
             pass
 
